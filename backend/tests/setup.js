@@ -12,12 +12,3 @@ if (!process.env.JWT_SECRET) {
 if (!process.env.PORT) {
   process.env.PORT = '3001';
 }
-
-// Suppress console output in tests
-global.console = {
-  ...console,
-  log: jest.fn(),
-  error: jest.fn(),
-  warn: jest.fn(),
-  info: jest.fn(),
-};
