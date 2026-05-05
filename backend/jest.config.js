@@ -1,0 +1,11 @@
+export default {
+  testEnvironment: 'node',
+  transform: {},
+  coveragePathIgnorePatterns: ['/node_modules/'],
+  testMatch: ['**/tests/**/*.test.js'],
+  collectCoverageFrom: ['src/**/*.js', '!src/index.js'],
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.js'],
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
+};

@@ -2,7 +2,10 @@
 
 function HomeScreen({ onCheckIn, onCheckOut, onOpen, history, hasCheckedIn }) {
   const now = useNow();
-  const shift = SHIFTS[CURRENT_USER.shift];
+  const { user, loading, error } = useUserData();
+  const currentUser = user || CURRENT_USER; // fallback to global if not loaded
+  const shift = SHIFTS[currentUser.shift];
+
   // Last 7 days mini-strip
   const last7 = history.slice(-7);
   const monthStats = useMemo(() => {
@@ -13,6 +16,32 @@ function HomeScreen({ onCheckIn, onCheckOut, onOpen, history, hasCheckedIn }) {
     return { lateDays, totalLate, totalPenalty, onTime };
   }, [history]);
 
+  // Show loading state if user data is still loading
+  if (loading) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.ink70 }}>Memuat data...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state if loading failed
+  if (error) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.late }}>⚠ Gagal memuat data: {error}</div>
+          <button onClick={() => window.location.reload()} style={{
+            marginTop: 16, padding: '10px 20px', background: TOKENS.ink, color: TOKENS.paper,
+            border: 'none', borderRadius: 6, cursor: 'pointer'
+          }}>Coba lagi</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: TOKENS.paper, minHeight: '100%', paddingBottom: 16 }}>
       {/* Header */}
@@ -21,7 +50,7 @@ function HomeScreen({ onCheckIn, onCheckOut, onOpen, history, hasCheckedIn }) {
           <div>
             <Eyebrow color="rgba(244,241,234,0.5)">D'AJIKS · KARYAWAN</Eyebrow>
             <div style={{ fontFamily: TOKENS.fontDisplay, fontSize: 32, fontStyle: 'italic', marginTop: 6, lineHeight: 1 }}>
-              Halo, {CURRENT_USER.name.split(' ')[0]}.
+              Halo, {currentUser.name.split(' ')[0]}.
             </div>
             <div style={{ fontSize: 13, color: 'rgba(244,241,234,0.6)', marginTop: 6, fontFamily: TOKENS.fontMono }}>
               {shift.label}
@@ -109,20 +138,20 @@ function HomeScreen({ onCheckIn, onCheckOut, onOpen, history, hasCheckedIn }) {
                     −{fmtRupiah(monthStats.totalPenalty)}
                   </div>
                   <div style={{ fontSize: 11, color: 'rgba(244,241,234,0.5)', marginTop: 4, fontFamily: TOKENS.fontMono }}>
-                    dari gaji pokok {fmtRupiah(CURRENT_USER.baseSalary)}
+                    dari gaji pokok {fmtRupiah(currentUser.baseSalary)}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <Eyebrow color="rgba(244,241,234,0.6)">SISA</Eyebrow>
                   <div style={{ fontFamily: TOKENS.fontMono, fontSize: 14, fontWeight: 600, marginTop: 6 }}>
-                    {fmtRupiah(CURRENT_USER.baseSalary - monthStats.totalPenalty)}
+                    {fmtRupiah(currentUser.baseSalary - monthStats.totalPenalty)}
                   </div>
                 </div>
               </div>
               {/* progress bar showing penalty share */}
               <div style={{ marginTop: 12, height: 6, background: 'rgba(244,241,234,0.12)', borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{
-                  width: `${monthStats.totalPenalty / CURRENT_USER.baseSalary * 100}%`,
+                  width: `${monthStats.totalPenalty / currentUser.baseSalary * 100}%`,
                   height: '100%', background: TOKENS.late
                 }} />
               </div>
@@ -191,6 +220,29 @@ function QuickAction({ label, sub, onClick }) {
 
 // ─────────── HISTORY ───────────
 function HistoryScreen({ history, onOpen }) {
+  const { history: loadedHistory, loading, error } = useAttendanceHistory();
+  const displayHistory = loadedHistory.length > 0 ? loadedHistory : history;
+
+  if (loading) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.ink70 }}>Memuat riwayat...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.late }}>⚠ Gagal memuat riwayat: {error}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: TOKENS.paper, minHeight: '100%' }}>
       <div style={{ padding: '60px 20px 16px' }}>
@@ -199,7 +251,7 @@ function HistoryScreen({ history, onOpen }) {
       </div>
 
       <div style={{ padding: '0 16px 16px' }}>
-        {[...history].reverse().map((d, i) =>
+        {[...displayHistory].reverse().map((d, i) =>
         <button key={i} onClick={() => d.status !== 'libur' && onOpen('day', d)} style={{
           display: 'flex', width: '100%', alignItems: 'center', gap: 12,
           padding: '14px 12px', background: TOKENS.card, border: `1px solid ${TOKENS.ink15}`,
@@ -234,8 +286,8 @@ function HistoryScreen({ history, onOpen }) {
           </button>
         )}
       </div>
-    </div>);
-
+    </div>
+  );
 }
 
 // ─────────── DAY DETAIL ───────────
@@ -269,7 +321,7 @@ function DayDetailScreen({ day, onBack }) {
           <div style={{ padding: '0 20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <ReceiptRow label="MASUK" value={day.checkIn} mono />
             <ReceiptRow label="PULANG" value={day.checkOut} mono />
-            <ReceiptRow label="TARGET" value={SHIFTS[CURRENT_USER.shift].start} mono />
+            <ReceiptRow label="TARGET" value={day.shiftStart || SHIFTS[CURRENT_USER.shift].start} mono />
             <ReceiptRow label="TELAT" value={fmtMin(day.late)} mono />
           </div>
           <div className="pc-divider" style={{ margin: '20px 12px' }} />
@@ -317,6 +369,9 @@ function ReceiptRow({ label, value, mono }) {
 
 // ─────────── REKAP BULANAN (slip) ───────────
 function RekapScreen({ history }) {
+  const { user, loading } = useUserData();
+  const currentUser = user || CURRENT_USER;
+
   const stats = useMemo(() => {
     const totalLate = history.reduce((s, d) => s + d.late, 0);
     const totalPenalty = history.reduce((s, d) => s + d.penalty, 0);
@@ -325,7 +380,17 @@ function RekapScreen({ history }) {
     const spDays = history.filter((d) => d.status === 'sp').length;
     return { totalLate, totalPenalty, onTime, lateDays, spDays };
   }, [history]);
-  const net = CURRENT_USER.baseSalary - stats.totalPenalty;
+  const net = currentUser.baseSalary - stats.totalPenalty;
+
+  if (loading) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.ink70 }}>Memuat data...</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: TOKENS.paper, minHeight: '100%', paddingBottom: 16 }}>
@@ -341,9 +406,9 @@ function RekapScreen({ history }) {
           <div style={{ padding: 20, display: 'flex', justifyContent: 'space-between' }}>
             <div>
               <Eyebrow>KARYAWAN</Eyebrow>
-              <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{CURRENT_USER.name}</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginTop: 4 }}>{currentUser.name}</div>
               <div style={{ fontFamily: TOKENS.fontMono, fontSize: 11, color: TOKENS.ink50, marginTop: 2 }}>
-                {CURRENT_USER.id} · {SHIFTS[CURRENT_USER.shift].label}
+                {currentUser.id} · {SHIFTS[currentUser.shift].label}
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -358,7 +423,7 @@ function RekapScreen({ history }) {
           <div style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
               <span style={{ fontSize: 13 }}>Gaji pokok</span>
-              <span className="mono tnum" style={{ fontWeight: 600, fontSize: 14 }}>{fmtRupiah(CURRENT_USER.baseSalary)}</span>
+              <span className="mono tnum" style={{ fontWeight: 600, fontSize: 14 }}>{fmtRupiah(currentUser.baseSalary)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
               <span style={{ fontSize: 13 }}>Total telat <span style={{ color: TOKENS.ink50 }}>({stats.totalLate}m × Rp 5.000)</span></span>
@@ -413,6 +478,19 @@ function RekapScreen({ history }) {
 
 // ─────────── PROFILE ───────────
 function ProfileScreen({ onLogout, onOpen }) {
+  const { user, loading } = useUserData();
+  const currentUser = user || CURRENT_USER;
+
+  if (loading) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.ink70 }}>Memuat data...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: TOKENS.paper, minHeight: '100%' }}>
       <div style={{ padding: '60px 20px 20px', background: TOKENS.ink, color: TOKENS.paper }}>
@@ -423,11 +501,11 @@ function ProfileScreen({ onLogout, onOpen }) {
             border: '1px solid rgba(244,241,234,0.3)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: TOKENS.fontDisplay, fontSize: 28, fontStyle: 'italic'
-          }}>{CURRENT_USER.photo}</div>
+          }}>{currentUser.photo}</div>
           <div>
-            <div style={{ fontFamily: TOKENS.fontDisplay, fontSize: 26, fontStyle: 'italic', lineHeight: 1 }}>{CURRENT_USER.name}</div>
+            <div style={{ fontFamily: TOKENS.fontDisplay, fontSize: 26, fontStyle: 'italic', lineHeight: 1 }}>{currentUser.name}</div>
             <div style={{ fontFamily: TOKENS.fontMono, fontSize: 11, color: 'rgba(244,241,234,0.6)', marginTop: 6 }}>
-              {CURRENT_USER.id} · BERGABUNG {CURRENT_USER.joined.toUpperCase()}
+              {currentUser.id} · BERGABUNG {currentUser.joined.toUpperCase()}
             </div>
           </div>
         </div>
@@ -435,9 +513,9 @@ function ProfileScreen({ onLogout, onOpen }) {
 
       <div style={{ padding: 16 }}>
         <Ticket padding={0}>
-          <ProfileRow label="Shift" value={SHIFTS[CURRENT_USER.shift].label} />
-          <ProfileRow label="Jam target" value={`${SHIFTS[CURRENT_USER.shift].start} — ${SHIFTS[CURRENT_USER.shift].end}`} />
-          <ProfileRow label="Gaji pokok" value={fmtRupiah(CURRENT_USER.baseSalary)} />
+          <ProfileRow label="Shift" value={SHIFTS[currentUser.shift].label} />
+          <ProfileRow label="Jam target" value={`${SHIFTS[currentUser.shift].start} — ${SHIFTS[currentUser.shift].end}`} />
+          <ProfileRow label="Gaji pokok" value={fmtRupiah(currentUser.baseSalary)} />
           <ProfileRow label="Lokasi kantor" value={OFFICE.name} />
           <ProfileRow label="Radius geofence" value={`${OFFICE.radius} meter`} last />
         </Ticket>
