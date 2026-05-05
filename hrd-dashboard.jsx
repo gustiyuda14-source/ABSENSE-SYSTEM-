@@ -51,9 +51,60 @@ function HRDDashboard() {
 }
 
 function OverviewSection() {
-  const totalToday = HRD_WEEK[HRD_WEEK.length - 1];
-  const weekTotal = HRD_WEEK.reduce((s, d) => s + d.totalPenalty, 0);
-  const maxPenalty = Math.max(...HRD_WEEK.map(d => d.totalPenalty));
+  const [weekData, setWeekData] = useState(HRD_WEEK);
+  const [todayData, setTodayData] = useState(HRD_WEEK[HRD_WEEK.length - 1]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const today = new Date();
+        const result = await window.dataService.getPayrollReport(
+          today.getFullYear(),
+          today.getMonth() + 1
+        );
+        if (result.success && result.data) {
+          setTodayData(result.data);
+        }
+      } catch (error) {
+        console.error('Failed to load payroll report:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  // Setup WebSocket for real-time updates
+  useEffect(() => {
+    if (!window.getWSClient) return;
+    const wsClient = window.getWSClient();
+
+    const handleCheckIn = (data) => {
+      console.log('Real-time: Employee checked in', data);
+      setTodayData(prev => ({
+        ...prev,
+        totalPresent: (prev.totalPresent || 0) + 1,
+      }));
+    };
+
+    const handleCheckOut = (data) => {
+      console.log('Real-time: Employee checked out', data);
+    };
+
+    wsClient.on('attendance:checked-in', handleCheckIn);
+    wsClient.on('attendance:checked-out', handleCheckOut);
+
+    return () => {
+      wsClient.off('attendance:checked-in', handleCheckIn);
+      wsClient.off('attendance:checked-out', handleCheckOut);
+    };
+  }, []);
+
+  const totalToday = todayData;
+  const weekTotal = weekData.reduce((s, d) => s + d.totalPenalty, 0);
+  const maxPenalty = Math.max(...weekData.map(d => d.totalPenalty));
 
   return (
     <div>
@@ -72,10 +123,10 @@ function OverviewSection() {
 
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
-        <KpiCard label="HADIR HARI INI" value="13" sub="dari 17 karyawan" />
-        <KpiCard label="TELAT" value="4" sub={`${fmtMin(58)} total`} accent={TOKENS.late} />
-        <KpiCard label="POTONGAN HARI INI" value={fmtRupiah(totalToday.totalPenalty)} sub={`vs kemarin: ${fmtRupiah(220000)}`} mono accent={TOKENS.late} small />
-        <KpiCard label="SP AKTIF" value="3" sub="2 SP-1, 1 SP-2" accent={TOKENS.sp} />
+        <KpiCard label="HADIR HARI INI" value={loading ? '...' : todayData?.totalPresent || '13'} sub={`dari 17 karyawan`} />
+        <KpiCard label="TELAT" value={loading ? '...' : todayData?.lateDays || '4'} sub={`${fmtMin(todayData?.totalLateMinutes || 58)} total`} accent={TOKENS.late} />
+        <KpiCard label="POTONGAN HARI INI" value={loading ? '...' : fmtRupiah(todayData?.totalPenalty || 290000)} sub={`vs kemarin: ${fmtRupiah(220000)}`} mono accent={TOKENS.late} small />
+        <KpiCard label="SP AKTIF" value={loading ? '...' : todayData?.activeSanctions || '3'} sub="2 SP-1, 1 SP-2" accent={TOKENS.sp} />
       </div>
 
       {/* Charts row */}
@@ -88,9 +139,9 @@ function OverviewSection() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 140, marginTop: 16, paddingBottom: 24, position: 'relative' }}>
-            {HRD_WEEK.map((d, i) => {
-              const h = (d.totalPenalty / maxPenalty) * 100;
-              const isToday = i === HRD_WEEK.length - 1;
+            {weekData.map((d, i) => {
+              const h = maxPenalty > 0 ? (d.totalPenalty / maxPenalty) * 100 : 0;
+              const isToday = i === weekData.length - 1;
               return (
                 <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
                   <div style={{ fontFamily: TOKENS.fontMono, fontSize: 9, color: TOKENS.ink50, marginBottom: 4 }}>
@@ -204,11 +255,50 @@ const btnSolid = {
 };
 
 function RosterSection() {
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadEmployees = async () => {
+      try {
+        setLoading(true);
+        // Load payroll report to get employee data with their stats
+        const today = new Date();
+        const result = await window.dataService.getPayrollReport(
+          today.getFullYear(),
+          today.getMonth() + 1
+        );
+        if (result.success && result.data && Array.isArray(result.data)) {
+          setEmployees(result.data);
+        } else {
+          // Fallback to hardcoded data
+          setEmployees(LEADERBOARD);
+        }
+      } catch (error) {
+        console.error('Failed to load employees:', error);
+        setEmployees(LEADERBOARD);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadEmployees();
+  }, []);
+
+  const displayEmployees = employees.length > 0 ? employees : LEADERBOARD;
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 20px', color: TOKENS.ink70 }}>
+        Memuat roster...
+      </div>
+    );
+  }
+
   return (
     <div>
       <Eyebrow>ROSTER</Eyebrow>
       <div style={{ fontFamily: TOKENS.fontDisplay, fontSize: 32, fontStyle: 'italic', marginTop: 4, marginBottom: 18 }}>
-        17 karyawan aktif
+        {displayEmployees.length} karyawan aktif
       </div>
       <Ticket padding={0} style={{ overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -220,7 +310,7 @@ function RosterSection() {
             </tr>
           </thead>
           <tbody>
-            {LEADERBOARD.map(p => (
+            {displayEmployees.map(p => (
               <tr key={p.id} style={{ borderBottom: `1px solid ${TOKENS.ink08}` }}>
                 <td className="mono" style={{ padding: '10px 14px', color: TOKENS.ink70 }}>{p.id}</td>
                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{p.name}</td>
