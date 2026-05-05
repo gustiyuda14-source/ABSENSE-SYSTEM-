@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<title>D'AJIKS · Sistem Absensi</title>
+<meta name="viewport" content="width=1600" />
+<style id="__bootstyle">
+  html, body, #app { margin: 0; padding: 0; }
+  body { background: #0A0A0A; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="shared.jsx"></script>
+<script type="text/babel" src="mobile-checkin.jsx"></script>
+<script type="text/babel" src="mobile-screens.jsx"></script>
+<script type="text/babel" src="hrd-dashboard.jsx"></script>
+
+<script type="text/babel">
+const { useState, useMemo, useEffect } = React;
+
+function App() {
+  const [role, setRole] = useState('karyawan'); // 'karyawan' | 'hrd'
+  const [route, setRoute] = useState('login');  // login | home | history | rekap | profile | notif | leaderboard | izin | day
+  const [tab, setTab] = useState('home');
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const [checkInMode, setCheckInMode] = useState('in');
+  const [hasCheckedIn, setHasCheckedIn] = useState(false);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [stageScale, setStageScale] = useState(1);
+  const [history] = useState(() => generateHistory());
+
+  // Inject global styles once
+  useEffect(() => {
+    if (document.getElementById('__global_css')) return;
+    const s = document.createElement('style');
+    s.id = '__global_css';
+    s.textContent = GLOBAL_CSS;
+    document.head.appendChild(s);
+  }, []);
+
+  // Auto-scale the whole stage to fit viewport
+  useEffect(() => {
+    const update = () => {
+      const targetW = 1500;
+      const targetH = 940;
+      const sx = window.innerWidth / targetW;
+      const sy = window.innerHeight / targetH;
+      setStageScale(Math.min(sx, sy, 1));
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  const handleTab = (t) => {
+    setTab(t);
+    if (t === 'home') setRoute('home');
+    else if (t === 'history') setRoute('history');
+    else if (t === 'rekap') setRoute('rekap');
+    else if (t === 'profile') setRoute('profile');
+  };
+
+  const openSub = (kind, payload) => {
+    if (kind === 'day') { setSelectedDay(payload); setRoute('day'); }
+    else setRoute(kind);
+  };
+
+  const renderMobile = () => {
+    if (route === 'login') return <LoginScreen onLogin={() => { setRoute('home'); setTab('home'); }} />;
+    if (route === 'history') return <HistoryScreen history={history} onOpen={openSub} />;
+    if (route === 'rekap')   return <RekapScreen history={history} />;
+    if (route === 'profile') return <ProfileScreen onLogout={() => setRoute('login')} onOpen={openSub} />;
+    if (route === 'notif')   return <NotifScreen onBack={() => setRoute('home')} />;
+    if (route === 'leaderboard') return <LeaderboardScreen onBack={() => setRoute('home')} />;
+    if (route === 'izin')    return <IzinScreen onBack={() => setRoute('home')} />;
+    if (route === 'day')     return <DayDetailScreen day={selectedDay} onBack={() => setRoute('history')} />;
+    return (
+      <HomeScreen
+        history={history}
+        hasCheckedIn={hasCheckedIn}
+        onCheckIn={() => { setCheckInMode('in'); setCheckInOpen(true); }}
+        onCheckOut={() => { setCheckInMode('out'); setCheckInOpen(true); }}
+        onOpen={openSub}
+      />
+    );
+  };
+
+  const showTabBar = ['home','history','rekap','profile'].includes(route);
+
+  return (
+    <div style={{
+      width: '100vw', height: '100vh', overflow: 'hidden',
+      background: TOKENS.ink, position: 'relative',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {/* Top role toggle */}
+      <div style={{
+        position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)',
+        zIndex: 100, display: 'flex', gap: 0,
+        background: 'rgba(10,10,10,0.85)', backdropFilter: 'blur(20px)',
+        padding: 4, borderRadius: 6, border: '1px solid rgba(244,241,234,0.15)',
+      }}>
+        <RoleBtn active={role === 'karyawan'} onClick={() => setRole('karyawan')} label="Karyawan · Mobile" sub="iOS" />
+        <RoleBtn active={role === 'hrd'} onClick={() => setRole('hrd')} label="HRD · Dashboard" sub="macOS" />
+      </div>
+
+      <div style={{
+        transform: `scale(${stageScale})`, transformOrigin: 'center center',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 60,
+      }}>
+        {role === 'karyawan' ? (
+          <div style={{ position: 'relative' }}>
+            <DeviceFrameWrap>
+              {renderMobile()}
+              {checkInOpen && (
+                <CheckInScreen
+                  mode={checkInMode}
+                  onClose={() => setCheckInOpen(false)}
+                  onComplete={(r) => {
+                    if (checkInMode === 'in' && r.status !== 'sp' || checkInMode === 'in') setHasCheckedIn(true);
+                  }}
+                />
+              )}
+              {showTabBar && !checkInOpen && (
+                <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+                  <TabBar active={tab} onTab={handleTab} />
+                </div>
+              )}
+            </DeviceFrameWrap>
+            <DeviceCaption text="KARYAWAN · iOS" />
+          </div>
+        ) : (
+          <div>
+            <HRDDashboard />
+            <DeviceCaption text="HRD · macOS Dashboard" centered />
+          </div>
+        )}
+      </div>
+
+      {/* Footer signature */}
+      <div style={{
+        position: 'fixed', bottom: 12, left: 0, right: 0, textAlign: 'center',
+        fontFamily: TOKENS.fontMono, fontSize: 10, letterSpacing: '0.16em',
+        color: 'rgba(244,241,234,0.35)', pointerEvents: 'none',
+      }}>D'AJIKS COFFEE &amp; BILLIARD · SISTEM ABSENSI v1.0 · {role === 'karyawan' ? 'Klik "HRD · Dashboard" untuk lihat sisi manajemen' : 'Klik "Karyawan · Mobile" untuk lihat sisi karyawan'}</div>
+    </div>
+  );
+}
+
+function RoleBtn({ active, onClick, label, sub }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '8px 16px', borderRadius: 4, border: 'none',
+      background: active ? TOKENS.paper : 'transparent',
+      color: active ? TOKENS.ink : 'rgba(244,241,234,0.7)',
+      fontFamily: TOKENS.fontUI, fontSize: 12, fontWeight: 600,
+      display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+      minWidth: 130,
+    }}>
+      <span>{label}</span>
+      <span style={{ fontFamily: TOKENS.fontMono, fontSize: 9, fontWeight: 500, letterSpacing: '0.12em', opacity: 0.6 }}>{sub}</span>
+    </button>
+  );
+}
+
+function DeviceFrameWrap({ children }) {
+  return (
+    <div style={{
+      width: 402, height: 874, borderRadius: 48, overflow: 'hidden',
+      position: 'relative', background: TOKENS.paper,
+      boxShadow: '0 40px 80px rgba(0,0,0,0.5), 0 0 0 8px #1a1a1a, 0 0 0 9px rgba(244,241,234,0.15)',
+      fontFamily: TOKENS.fontUI,
+    }}>
+      {/* dynamic island */}
+      <div style={{
+        position: 'absolute', top: 11, left: '50%', transform: 'translateX(-50%)',
+        width: 126, height: 37, borderRadius: 24, background: '#000', zIndex: 50,
+      }} />
+      {/* status bar */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30,
+        padding: '18px 32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        fontFamily: '-apple-system, system-ui', fontSize: 15, fontWeight: 600,
+      }}>
+        <span style={{ color: '#000' }}>9:41</span>
+        <span style={{ color: '#000', fontFamily: TOKENS.fontMono, fontSize: 11, opacity: 0.6 }}>D'AJIKS</span>
+      </div>
+      {/* content */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
+        <div style={{ height: '100%', overflowY: 'auto' }} className="noscroll">
+          {children}
+        </div>
+      </div>
+      {/* home indicator */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 60,
+        height: 34, display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+        paddingBottom: 8, pointerEvents: 'none',
+      }}>
+        <div style={{ width: 139, height: 5, borderRadius: 100, background: 'rgba(0,0,0,0.25)' }} />
+      </div>
+    </div>
+  );
+}
+
+function DeviceCaption({ text, centered }) {
+  return (
+    <div style={{
+      marginTop: 18, textAlign: centered ? 'center' : 'left',
+      fontFamily: TOKENS.fontMono, fontSize: 10, letterSpacing: '0.18em',
+      color: 'rgba(244,241,234,0.5)',
+    }}>{text}</div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('app'));
+root.render(<App />);
+</script>
+</body>
+</html>
