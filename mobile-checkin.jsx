@@ -6,13 +6,52 @@ const { useState: _useState, useEffect: _useEffect, useRef: _useRef } = React;
 function CheckInScreen({ onClose, onComplete, mode = 'in' /* 'in' | 'out' */, simulated }) {
   const now = useNow();
   const shift = SHIFTS[CURRENT_USER.shift];
-  const [stage, setStage] = useState('arriving'); // arriving | punching | result
+  const [stage, setStage] = useState('arriving'); // arriving | punching | result | loading
   const [holdProgress, setHoldProgress] = useState(0); // 0..1
   const [inZone, setInZone] = useState(simulated?.inZone ?? true);
-  // Late minutes to simulate. If null, compute from now vs shift.start
   const [lateMin, setLateMin] = useState(null);
+  const [resultData, setResultData] = useState(null);
   const holdRef = useRef(null);
   const startRef = useRef(0);
+
+  // GPS state
+  const [gps, setGps] = useState({ lat: null, lng: null, status: 'acquiring', accuracy: null });
+  const [error, setError] = useState(null);
+  const gpsRef = useRef(null);
+
+  // Initialize GPS on mount
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setError('Geolocation tidak didukung browser');
+      setGps(g => ({ ...g, status: 'unavailable' }));
+      return;
+    }
+
+    // Request one-time high-accuracy position
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        setGps({
+          lat: latitude,
+          lng: longitude,
+          accuracy: Math.round(accuracy),
+          status: 'ready'
+        });
+        setError(null);
+      },
+      (err) => {
+        setError(`GPS Error: ${err.message}`);
+        setGps(g => ({ ...g, status: 'denied' }));
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
 
   const computedLate = useMemo(() => {
     if (lateMin !== null) return lateMin;
@@ -24,7 +63,12 @@ function CheckInScreen({ onClose, onComplete, mode = 'in' /* 'in' | 'out' */, si
   }, [now, shift, mode, lateMin]);
 
   const startHold = () => {
-    if (!inZone || stage !== 'arriving') return;
+    if (stage !== 'arriving') return;
+    if (!gps.lat || !gps.lng) {
+      setError('Menunggu lokasi GPS...');
+      return;
+    }
+
     setStage('punching');
     startRef.current = Date.now();
     const tick = () => {
@@ -32,12 +76,49 @@ function CheckInScreen({ onClose, onComplete, mode = 'in' /* 'in' | 'out' */, si
       const p = Math.min(1, elapsed);
       setHoldProgress(p);
       if (p >= 1) {
-        setStage('result');
+        performCheckIn();
       } else {
         holdRef.current = requestAnimationFrame(tick);
       }
     };
     holdRef.current = requestAnimationFrame(tick);
+  };
+
+  const performCheckIn = async () => {
+    setStage('loading');
+    try {
+      if (mode === 'in') {
+        const result = await window.dataService.checkIn(
+          CURRENT_USER.shift,
+          gps.lat,
+          gps.lng
+        );
+        if (result.success) {
+          setResultData({ ...result.data, gpsLat: gps.lat, gpsLng: gps.lng });
+          setStage('result');
+        } else {
+          setError(result.error?.message || 'Check-in gagal');
+          setStage('arriving');
+        }
+      } else {
+        const today = new Date().toISOString().split('T')[0];
+        const result = await window.dataService.checkOut(
+          today,
+          gps.lat,
+          gps.lng
+        );
+        if (result.success) {
+          setResultData({ ...result.data, gpsLat: gps.lat, gpsLng: gps.lng });
+          setStage('result');
+        } else {
+          setError(result.error?.message || 'Check-out gagal');
+          setStage('arriving');
+        }
+      }
+    } catch (err) {
+      setError(err.message);
+      setStage('arriving');
+    }
   };
 
   const cancelHold = () => {
@@ -47,13 +128,6 @@ function CheckInScreen({ onClose, onComplete, mode = 'in' /* 'in' | 'out' */, si
       setHoldProgress(0);
     }
   };
-
-  const result = useMemo(() => {
-    if (stage !== 'result') return null;
-    const status = computedLate === 0 ? 'tepat' : computedLate >= 30 ? 'sp' : 'telat';
-    const penalty = computedLate * 5000;
-    return { status, late: computedLate, penalty };
-  }, [stage, computedLate]);
 
   return (
     <div style={{
@@ -72,20 +146,22 @@ function CheckInScreen({ onClose, onComplete, mode = 'in' /* 'in' | 'out' */, si
 
       {stage !== 'result' ? (
         <CheckInActive
-          shift={shift} now={now} inZone={inZone} setInZone={setInZone}
+          shift={shift} now={now} inZone={inZone}
           stage={stage} holdProgress={holdProgress} startHold={startHold} cancelHold={cancelHold}
           mode={mode} computedLate={computedLate}
-          // simulators
-          setLateMin={setLateMin}
+          gps={gps} error={error}
         />
       ) : (
-        <CheckInResult result={result} mode={mode} now={now} onClose={() => { onComplete?.(result); onClose?.(); }} />
+        <CheckInResult result={resultData} mode={mode} now={now} gps={gps} onClose={() => { onComplete?.(resultData); onClose?.(); }} />
       )}
     </div>
   );
 }
 
-function CheckInActive({ shift, now, inZone, setInZone, stage, holdProgress, startHold, cancelHold, mode, computedLate, setLateMin }) {
+function CheckInActive({ shift, now, inZone, stage, holdProgress, startHold, cancelHold, mode, computedLate, gps, error }) {
+  const gpsReady = gps && gps.status === 'ready';
+  const gpsStatusColor = gps?.status === 'ready' ? TOKENS.ontime : gps?.status === 'acquiring' ? 'rgba(244,241,234,0.6)' : TOKENS.late;
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '24px 20px 20px', overflow: 'auto' }} className="noscroll">
       {/* live time */}
@@ -116,39 +192,50 @@ function CheckInActive({ shift, now, inZone, setInZone, stage, holdProgress, sta
         </div>
       </div>
 
-      {/* mini map */}
-      <div style={{ marginTop: 14 }}>
-        <MiniMap inside={inZone} height={140} animate />
+      {/* GPS status indicator */}
+      <div style={{
+        marginTop: 14, padding: '12px 14px',
+        background: 'rgba(244,241,234,0.06)', borderRadius: 6,
+        border: `1px solid rgba(244,241,234,0.10)`,
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'rgba(244,241,234,0.6)', fontFamily: TOKENS.fontMono }}>LOKASI GPS</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginTop: 2, color: gpsStatusColor }}>
+              {gps?.status === 'acquiring' ? '📍 Mencari sinyal...' : gps?.status === 'ready' ? '✓ Siap stempel' : gps?.status === 'denied' ? '✗ Akses ditolak' : '✗ Tidak tersedia'}
+            </div>
+          </div>
+          {gpsReady && gps?.accuracy && (
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 11, color: 'rgba(244,241,234,0.6)', fontFamily: TOKENS.fontMono }}>AKURASI</div>
+              <div style={{ fontFamily: TOKENS.fontMono, fontSize: 14, fontWeight: 600, marginTop: 2 }}>±{gps.accuracy}m</div>
+            </div>
+          )}
+        </div>
+        {gpsReady && gps?.lat && gps?.lng && (
+          <div style={{ marginTop: 10, fontSize: 12, fontFamily: TOKENS.fontMono, color: 'rgba(244,241,234,0.7)', lineHeight: 1.6 }}>
+            <div>Lat: {gps.lat.toFixed(6)}</div>
+            <div>Lng: {gps.lng.toFixed(6)}</div>
+          </div>
+        )}
       </div>
 
-      {/* zone simulator (subtle, looks like a setting) */}
-      <div style={{
-        marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between',
-        fontFamily: TOKENS.fontMono, fontSize: 10, color: 'rgba(244,241,234,0.6)',
-      }}>
-        <span>SIMULASI · GESER UNTUK UJI COBA</span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <SimChip label="Di kantor" active={inZone} onClick={() => setInZone(true)} />
-          <SimChip label="Di luar" active={!inZone} onClick={() => setInZone(false)} />
+      {/* error message display */}
+      {error && (
+        <div style={{
+          marginTop: 10, padding: '10px 12px',
+          background: 'rgba(204,87,46,0.15)', borderRadius: 6,
+          border: `1px solid ${TOKENS.late}`,
+          fontSize: 12, color: TOKENS.late, fontFamily: TOKENS.fontMono,
+        }}>
+          ⚠ {error}
         </div>
-      </div>
-      <div style={{
-        marginTop: 6, display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'space-between',
-        fontFamily: TOKENS.fontMono, fontSize: 10, color: 'rgba(244,241,234,0.6)',
-      }}>
-        <span>JAM SIMULASI</span>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <SimChip label="Tepat" onClick={() => setLateMin(0)} />
-          <SimChip label="+8m" onClick={() => setLateMin(8)} />
-          <SimChip label="+18m" onClick={() => setLateMin(18)} />
-          <SimChip label="+34m" onClick={() => setLateMin(34)} />
-        </div>
-      </div>
+      )}
 
       {/* live computed late preview */}
       {computedLate > 0 && (
         <div style={{
-          marginTop: 16, padding: 12, border: `1px solid ${TOKENS.late}`, borderRadius: 6,
+          marginTop: 14, padding: 12, border: `1px solid ${TOKENS.late}`, borderRadius: 6,
           background: 'rgba(204,87,46,0.10)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
@@ -176,31 +263,21 @@ function CheckInActive({ shift, now, inZone, setInZone, stage, holdProgress, sta
         onStart={startHold}
         onCancel={cancelHold}
         mode={mode}
+        gpsReady={gpsReady}
       />
       <div style={{
         textAlign: 'center', marginTop: 10, fontFamily: TOKENS.fontMono, fontSize: 10,
         color: 'rgba(244,241,234,0.5)', letterSpacing: '0.1em',
       }}>
-        {!inZone ? 'KELUAR DARI ZONA · TIDAK BISA MEMUKUL KARTU' : stage === 'punching' ? 'TAHAN TERUS...' : 'TAHAN 1.5 DETIK UNTUK STEMPEL'}
+        {!gpsReady ? (gps?.status === 'denied' ? 'GPS DITOLAK · AKTIFKAN LOKASI' : 'MENUNGGU SINYAL GPS...') : stage === 'punching' ? 'TAHAN TERUS...' : 'TAHAN 1.5 DETIK UNTUK STEMPEL'}
       </div>
     </div>
   );
 }
 
-function SimChip({ label, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      padding: '3px 8px', borderRadius: 3,
-      background: active ? TOKENS.paper : 'transparent',
-      color: active ? TOKENS.ink : 'rgba(244,241,234,0.8)',
-      border: `1px solid ${active ? TOKENS.paper : 'rgba(244,241,234,0.3)'}`,
-      fontFamily: TOKENS.fontMono, fontSize: 10, fontWeight: 600, letterSpacing: '0.06em',
-    }}>{label}</button>
-  );
-}
 
-function HoldToPunchButton({ inZone, stage, progress, onStart, onCancel, mode }) {
-  const disabled = !inZone;
+function HoldToPunchButton({ inZone, stage, progress, onStart, onCancel, mode, gpsReady }) {
+  const disabled = !inZone || !gpsReady || stage === 'loading';
   const size = 200;
   const r = (size - 16) / 2;
   const C = 2 * Math.PI * r;
@@ -221,8 +298,9 @@ function HoldToPunchButton({ inZone, stage, progress, onStart, onCancel, mode })
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           cursor: disabled ? 'not-allowed' : 'pointer',
           transition: 'transform 0.1s ease',
-          transform: stage === 'punching' ? 'scale(0.96)' : 'scale(1)',
+          transform: stage === 'punching' ? 'scale(0.96)' : stage === 'loading' ? 'scale(0.95)' : 'scale(1)',
           boxShadow: disabled ? 'none' : '0 0 0 1px rgba(244,241,234,0.1), 0 12px 40px rgba(244,241,234,0.06)',
+          opacity: stage === 'loading' ? 0.7 : 1,
         }}
       >
         {/* progress ring */}
@@ -249,10 +327,20 @@ function HoldToPunchButton({ inZone, stage, progress, onStart, onCancel, mode })
   );
 }
 
-function CheckInResult({ result, mode, now, onClose }) {
-  const { status, late, penalty } = result;
+function CheckInResult({ result, mode, now, gps, onClose }) {
+  if (!result) {
+    return (
+      <div style={{ flex: 1, padding: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: 'rgba(244,241,234,0.7)' }}>Memproses...</div>
+        </div>
+      </div>
+    );
+  }
+
+  const { status, late, penalty, gpsLat, gpsLng } = result;
   const colorMap = { tepat: TOKENS.ontime, telat: TOKENS.late, sp: TOKENS.sp };
-  const accent = colorMap[status];
+  const accent = colorMap[status] || TOKENS.ontime;
 
   return (
     <div style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column' }}>
@@ -288,8 +376,8 @@ function CheckInResult({ result, mode, now, onClose }) {
           <ReceiptRow label="ID" value={CURRENT_USER.id} mono />
           <ReceiptRow label="TARGET" value={SHIFTS[CURRENT_USER.shift].start} mono />
           <ReceiptRow label="STEMPEL" value={`${pad2(now.getHours())}:${pad2(now.getMinutes())}`} mono />
-          <ReceiptRow label="LAT" value="-6.8918°" mono />
-          <ReceiptRow label="LNG" value="107.6094°" mono />
+          <ReceiptRow label="LAT" value={gpsLat ? gpsLat.toFixed(4) + '°' : '-'} mono />
+          <ReceiptRow label="LNG" value={gpsLng ? gpsLng.toFixed(4) + '°' : '-'} mono />
         </div>
 
         <div className="pc-divider" style={{ margin: '20px 12px' }} />
