@@ -220,6 +220,29 @@ function QuickAction({ label, sub, onClick }) {
 
 // ─────────── HISTORY ───────────
 function HistoryScreen({ history, onOpen }) {
+  const { history: loadedHistory, loading, error } = useAttendanceHistory();
+  const displayHistory = loadedHistory.length > 0 ? loadedHistory : history;
+
+  if (loading) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.ink70 }}>Memuat riwayat...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ background: TOKENS.paper, minHeight: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 14, color: TOKENS.late }}>⚠ Gagal memuat riwayat: {error}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ background: TOKENS.paper, minHeight: '100%' }}>
       <div style={{ padding: '60px 20px 16px' }}>
@@ -228,7 +251,7 @@ function HistoryScreen({ history, onOpen }) {
       </div>
 
       <div style={{ padding: '0 16px 16px' }}>
-        {[...history].reverse().map((d, i) =>
+        {[...displayHistory].reverse().map((d, i) =>
         <button key={i} onClick={() => d.status !== 'libur' && onOpen('day', d)} style={{
           display: 'flex', width: '100%', alignItems: 'center', gap: 12,
           padding: '14px 12px', background: TOKENS.card, border: `1px solid ${TOKENS.ink15}`,
@@ -263,8 +286,8 @@ function HistoryScreen({ history, onOpen }) {
           </button>
         )}
       </div>
-    </div>);
-
+    </div>
+  );
 }
 
 // ─────────── DAY DETAIL ───────────
